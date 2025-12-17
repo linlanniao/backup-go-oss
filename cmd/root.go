@@ -12,8 +12,14 @@ import (
 )
 
 var (
-	logLevel string // 日志级别
-	logDir   string // 日志目录
+	logLevel        string // 日志级别
+	logDir          string // 日志目录
+	envFile         string // .env 文件路径
+	ossEndpoint     string // OSS端点地址
+	ossAccessKey    string // OSS AccessKey
+	ossSecretKey    string // OSS SecretKey
+	ossBucket       string // OSS存储桶名称
+	ossObjectPrefix string // OSS对象前缀
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -67,4 +73,12 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "", "日志级别 (debug/info/warn/error)，可通过 LOG_LEVEL 环境变量设置，默认为 info")
 	// 添加日志目录选项
 	rootCmd.PersistentFlags().StringVar(&logDir, "log-dir", "", "日志文件输出目录，如果指定则会将日志输出到文件")
+	// 添加 .env 文件路径选项
+	rootCmd.PersistentFlags().StringVar(&envFile, "env-file", "", ".env 配置文件路径（默认为当前目录下的 .env 文件）")
+	// 添加全局 OSS 配置选项
+	rootCmd.PersistentFlags().StringVarP(&ossEndpoint, "endpoint", "e", "", "OSS端点地址（可通过 OSS_ENDPOINT 环境变量设置）")
+	rootCmd.PersistentFlags().StringVarP(&ossAccessKey, "access-key", "a", "", "OSS AccessKey（可通过 OSS_ACCESS_KEY 环境变量设置）")
+	rootCmd.PersistentFlags().StringVarP(&ossSecretKey, "secret-key", "s", "", "OSS SecretKey（可通过 OSS_SECRET_KEY 环境变量设置）")
+	rootCmd.PersistentFlags().StringVarP(&ossBucket, "bucket", "b", "", "OSS存储桶名称（可通过 OSS_BUCKET 环境变量设置）")
+	rootCmd.PersistentFlags().StringVar(&ossObjectPrefix, "prefix", "", "OSS对象前缀（可通过 OSS_OBJECT_PREFIX 环境变量设置，默认为时间戳）")
 }

@@ -20,9 +20,19 @@ type Config struct {
 }
 
 // LoadConfig 加载配置，优先从命令行参数，其次从环境变量，最后从 .env 文件
-func LoadConfig() (*Config, error) {
+// envFile 参数指定 .env 文件路径，如果为空则使用默认路径（当前目录下的 .env）
+func LoadConfig(envFile string) (*Config, error) {
 	// 尝试加载 .env 文件（如果存在）
-	_ = godotenv.Load()
+	if envFile != "" {
+		// 如果指定了 .env 文件路径，使用指定的路径
+		if err := godotenv.Load(envFile); err != nil {
+			// 如果文件不存在，不报错，继续使用环境变量
+			_ = err
+		}
+	} else {
+		// 如果没有指定路径，尝试加载当前目录下的 .env 文件
+		_ = godotenv.Load()
+	}
 
 	// 解析多个目录（逗号分隔）
 	dirsStr := getEnvOrDefault("DIRS_TO_BACKUP", "")
