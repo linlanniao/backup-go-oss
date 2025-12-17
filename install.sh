@@ -9,8 +9,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # 配置变量
-REPO_OWNER="YOUR_GITHUB_USERNAME"  # 请替换为实际的 GitHub 用户名或组织名
-REPO_NAME="backup-to-oss"
+REPO_OWNER="linlanniao"
+REPO_NAME="backup-go-oss"
 BINARY_NAME="backup-to-oss"
 INSTALL_DIR="/usr/local/bin"
 
