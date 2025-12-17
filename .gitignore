@@ -1,0 +1,6 @@
+.vscode
+.env
+.idea
+.DS_Store
+backup-to-oss
+logs/
