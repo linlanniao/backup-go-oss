@@ -189,7 +189,7 @@ echo ""
 
 # 创建临时目录
 TMP_DIR=$(mktemp -d)
-trap "rm -rf $TMP_DIR" EXIT
+
 
 # 下载文件
 echo "正在下载..."
