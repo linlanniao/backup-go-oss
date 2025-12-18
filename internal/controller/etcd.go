@@ -26,6 +26,7 @@ type EtcdBackupRequest struct {
 	DialTimeout     time.Duration // 连接超时时间
 	CommandTimeout  time.Duration // 命令超时时间（0 表示无超时）
 	CompressMethod  string        // 压缩方式 (zstd/gzip/none)
+	KeepBackupFiles bool          // 是否保留备份文件
 	OSSEndpoint     string
 	OSSAccessKey    string
 	OSSSecretKey    string
@@ -70,7 +71,7 @@ func EtcdBackup(req EtcdBackupRequest) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tempSnapshotPath)
+	// tempSnapshotPath 在压缩完成后会被删除
 
 	// 压缩 snapshot 文件
 	compressMethod := req.CompressMethod
@@ -95,7 +96,14 @@ func EtcdBackup(req EtcdBackupRequest) error {
 	if err := compress.CompressFile(tempSnapshotPath, compressedPath, compressMethod); err != nil {
 		return fmt.Errorf("压缩 snapshot 文件失败: %v", err)
 	}
-	defer os.Remove(compressedPath)
+	// 压缩完成后删除未压缩的临时文件
+	if !req.KeepBackupFiles {
+		os.Remove(tempSnapshotPath)
+		defer os.Remove(compressedPath)
+	} else {
+		os.Remove(tempSnapshotPath) // 只保留压缩后的文件
+		logger.Info("备份文件已保留", "path", compressedPath)
+	}
 
 	// 获取压缩后的文件大小
 	fileInfo, err := os.Stat(tempSnapshotPath)
@@ -152,7 +160,10 @@ func EtcdBackup(req EtcdBackupRequest) error {
 		return fmt.Errorf("上传到 OSS 失败: %v", err)
 	}
 
-	logger.Info("etcd snapshot 备份完成", "version", result.Version)
+	if req.KeepBackupFiles {
+		logger.Info("etcd snapshot 备份完成，备份文件已保留", "version", result.Version, "backup_file", compressedPath)
+	} else {
+		logger.Info("etcd snapshot 备份完成", "version", result.Version)
+	}
 	return nil
 }
-

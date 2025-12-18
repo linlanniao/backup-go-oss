@@ -18,6 +18,7 @@ type DirBackupRequest struct {
 	DirPaths        []string // 支持多个目录
 	ExcludePatterns []string // 排除模式列表
 	CompressMethod  string   // 压缩方式 (zstd/gzip/none)
+	KeepBackupFiles bool     // 是否保留备份文件
 	OSSEndpoint     string
 	OSSAccessKey    string
 	OSSSecretKey    string
@@ -126,13 +127,19 @@ func DirBackup(req DirBackupRequest) error {
 
 		if err := oss.UploadFile(archivePath, ossConfig); err != nil {
 			logger.Error("上传到OSS失败", "error", err)
-			os.Remove(archivePath) // 清理临时文件
+			if !req.KeepBackupFiles {
+				os.Remove(archivePath) // 清理临时文件
+			}
 			continue
 		}
 
-		// 上传成功后删除临时文件
-		os.Remove(archivePath)
-		logger.Info("目录备份完成", "path", dirPath)
+		// 上传成功后根据配置决定是否删除临时文件
+		if req.KeepBackupFiles {
+			logger.Info("目录备份完成，备份文件已保留", "path", dirPath, "backup_file", archivePath)
+		} else {
+			os.Remove(archivePath)
+			logger.Info("目录备份完成", "path", dirPath)
+		}
 	}
 
 	logger.Info("所有备份任务完成", "total", len(req.DirPaths))

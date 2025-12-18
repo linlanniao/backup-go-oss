@@ -2,8 +2,11 @@ package etcd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"os"
+	"os/exec"
 
 	"github.com/coreos/go-semver/semver"
 	"go.etcd.io/etcd/pkg/v3/traceutil"
@@ -30,7 +33,7 @@ type SnapshotStatusInfo struct {
 }
 
 // CheckSnapshotStatus 检查并验证 etcd snapshot 文件的状态
-// 参考 etcd 的 snapshot status 实现
+// 使用 etcdutl 命令获取准确的状态信息，确保与官方工具一致
 // 返回 snapshot 的状态信息，如果文件无效则返回错误
 func CheckSnapshotStatus(filePath string) (*SnapshotStatusInfo, error) {
 	// 检查文件是否存在
@@ -42,6 +45,78 @@ func CheckSnapshotStatus(filePath string) (*SnapshotStatusInfo, error) {
 		return nil, fmt.Errorf("snapshot 文件为空")
 	}
 
+	// 尝试使用 etcdutl 命令获取状态信息（优先使用，确保与官方工具一致）
+	statusInfo, err := getStatusViaEtcdutl(filePath)
+	if err == nil {
+		return statusInfo, nil
+	}
+
+	// 如果 etcdutl 不可用，回退到使用 etcdctl
+	statusInfo, err = getStatusViaEtcdctl(filePath)
+	if err == nil {
+		return statusInfo, nil
+	}
+
+	// 如果命令行工具都不可用，使用内部实现（可能不够准确）
+	return getStatusViaInternal(filePath)
+}
+
+// getStatusViaEtcdutl 使用 etcdutl 命令获取 snapshot 状态
+func getStatusViaEtcdutl(filePath string) (*SnapshotStatusInfo, error) {
+	cmd := exec.Command("etcdutl", "snapshot", "status", filePath, "--write-out=json")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("执行 etcdutl 命令失败: %w", err)
+	}
+
+	return parseStatusJSON(output)
+}
+
+// getStatusViaEtcdctl 使用 etcdctl 命令获取 snapshot 状态（兼容旧版本）
+func getStatusViaEtcdctl(filePath string) (*SnapshotStatusInfo, error) {
+	cmd := exec.Command("etcdctl", "snapshot", "status", filePath, "--write-out=json")
+	cmd.Env = append(os.Environ(), "ETCDCTL_API=3")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("执行 etcdctl 命令失败: %w", err)
+	}
+
+	return parseStatusJSON(output)
+}
+
+// parseStatusJSON 解析 JSON 格式的状态信息
+// 处理可能包含警告信息的输出（如 etcdctl 的弃用警告）
+func parseStatusJSON(output []byte) (*SnapshotStatusInfo, error) {
+	// 查找 JSON 对象的开始位置（跳过可能的警告信息）
+	start := 0
+	for i := 0; i < len(output); i++ {
+		if output[i] == '{' {
+			start = i
+			break
+		}
+	}
+
+	var result struct {
+		Hash      uint32 `json:"hash"`
+		Revision  int64  `json:"revision"`
+		TotalKey  int    `json:"totalKey"`
+		TotalSize int64  `json:"totalSize"`
+	}
+
+	if err := json.Unmarshal(output[start:], &result); err != nil {
+		return nil, fmt.Errorf("解析 JSON 输出失败: %w", err)
+	}
+
+	return &SnapshotStatusInfo{
+		Hash:      result.Hash,
+		Revision:  result.Revision,
+		TotalKey:  result.TotalKey,
+		TotalSize: result.TotalSize,
+	}, nil
+}
+
+// getStatusViaInternal 使用内部实现获取 snapshot 状态（备用方案）
+func getStatusViaInternal(filePath string) (*SnapshotStatusInfo, error) {
 	// 创建一个简单的 logger（不输出日志）
 	lg := zap.NewNop()
 
@@ -53,7 +128,6 @@ func CheckSnapshotStatus(filePath string) (*SnapshotStatusInfo, error) {
 	cluster := &noOpCluster{}
 
 	// 创建 lessor（租约管理器）用于 snapshot 恢复
-	// 对于只读的 status 检查，我们需要创建一个 lessor 来避免 panic
 	lessor := lease.NewLessor(lg, be, cluster, lease.LessorConfig{})
 	defer lessor.Stop()
 
@@ -65,50 +139,50 @@ func CheckSnapshotStatus(filePath string) (*SnapshotStatusInfo, error) {
 	rev := store.Rev()
 
 	// 使用 Read 方法创建一个只读事务来验证 snapshot
-	// 使用 traceutil.TODO() 而不是 nil，避免 nil pointer dereference
 	txn := store.Read(mvcc.ConcurrentReadTxMode, traceutil.TODO())
 	defer txn.End()
 
-	// 计算总键数和总大小
+	// 遍历所有键值对来计算总键数、总大小和哈希值
 	totalKey := 0
 	totalSize := int64(0)
+	hash := crc32.NewIEEE()
 
-	// 首先使用 Count 选项来获取总键数（更高效）
-	countResult, err := txn.Range(context.Background(), []byte{}, []byte{0xff}, mvcc.RangeOptions{Count: true})
-	if err != nil {
-		return nil, fmt.Errorf("读取 snapshot 计数失败: %w", err)
-	}
-	totalKey = countResult.Count
+	// 使用 Range 遍历所有键值对
+	// 注意：这里需要遍历所有键值对才能得到准确的统计信息
+	key := []byte{}
+	end := []byte{0xff}
 
-	// 如果 Count 为 0，尝试获取实际的键值对来计算
-	if totalKey == 0 {
-		// 使用 Limit 来限制返回的键值对数量，避免内存占用过大
-		// 这里我们只读取一部分来验证文件完整性
-		result, err := txn.Range(context.Background(), []byte{}, []byte{0xff}, mvcc.RangeOptions{Limit: 1000})
+	for {
+		result, err := txn.Range(context.Background(), key, end, mvcc.RangeOptions{Limit: 1000})
 		if err != nil {
 			return nil, fmt.Errorf("读取 snapshot 数据失败: %w", err)
 		}
-		totalKey = len(result.KVs)
-		// 计算总大小（键值对的总大小）
-		for _, kv := range result.KVs {
-			totalSize += int64(len(kv.Key) + len(kv.Value))
+
+		if len(result.KVs) == 0 {
+			break
 		}
-	} else {
-		// 如果 Count > 0，使用文件大小作为总大小的近似值
-		// 因为遍历所有键值对可能很耗时
-		totalSize = fileInfo.Size()
-	}
 
-	// 如果总大小为 0，使用文件大小作为近似值
-	if totalSize == 0 {
-		totalSize = fileInfo.Size()
-	}
+		for _, kv := range result.KVs {
+			totalKey++
+			kvSize := int64(len(kv.Key) + len(kv.Value))
+			totalSize += kvSize
 
-	// 计算哈希值（使用修订版本和总大小的简单哈希）
-	hash := uint32((rev + totalSize) % 0xFFFFFFFF)
+			// 更新哈希值（包含键和值）
+			hash.Write(kv.Key)
+			hash.Write(kv.Value)
+		}
+
+		// 如果返回的键值对数量少于 Limit，说明已经遍历完所有键
+		if len(result.KVs) < 1000 {
+			break
+		}
+
+		// 设置下一次查询的起始键（使用最后一个键的下一个键）
+		key = append(result.KVs[len(result.KVs)-1].Key, 0)
+	}
 
 	info := &SnapshotStatusInfo{
-		Hash:      hash,
+		Hash:      hash.Sum32(),
 		Revision:  rev,
 		TotalKey:  totalKey,
 		TotalSize: totalSize,

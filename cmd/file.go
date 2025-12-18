@@ -61,6 +61,14 @@ func runFileBackup() error {
 		return fmt.Errorf("加载配置失败: %v", err)
 	}
 
+	// 获取保留备份文件选项（优先使用命令行参数，其次环境变量）
+	keepBackupFilesFlag := keepBackupFiles
+	if !keepBackupFilesFlag {
+		if envKeep := os.Getenv("KEEP_BACKUP_FILES"); envKeep == "true" || envKeep == "1" {
+			keepBackupFilesFlag = true
+		}
+	}
+
 	// 获取压缩方式（优先使用命令行参数，其次环境变量，最后使用默认值）
 	compressMethodValue := compressMethod
 	if compressMethodValue == "" {
@@ -83,6 +91,7 @@ func runFileBackup() error {
 	req := controller.FileBackupRequest{
 		FilePaths:       cfg.FilePaths,
 		CompressMethod:  cfg.CompressMethod,
+		KeepBackupFiles: keepBackupFilesFlag,
 		OSSEndpoint:     cfg.OSSEndpoint,
 		OSSAccessKey:    cfg.OSSAccessKey,
 		OSSSecretKey:    cfg.OSSSecretKey,
@@ -92,4 +101,3 @@ func runFileBackup() error {
 
 	return controller.FileBackup(req)
 }
-

@@ -24,6 +24,7 @@ type ConsulBackupRequest struct {
 	ConsulToken     string // Consul ACL Token（可选）
 	Stale           bool   // 是否允许从非 leader 节点获取快照
 	CompressMethod  string // 压缩方式 (zstd/gzip/none)
+	KeepBackupFiles bool   // 是否保留备份文件
 	OSSEndpoint     string
 	OSSAccessKey    string
 	OSSSecretKey    string
@@ -95,7 +96,7 @@ func ConsulBackup(req ConsulBackupRequest) error {
 	if err := safeio.Rename(unverifiedPath, tempSnapshotPath); err != nil {
 		return fmt.Errorf("重命名 snapshot 文件失败: %v", err)
 	}
-	defer os.Remove(tempSnapshotPath)
+	// tempSnapshotPath 在压缩完成后会被删除（如果 KeepBackupFiles 为 false，则通过 defer 删除）
 
 	// 执行 inspect 操作验证 snapshot 完整性
 	logger.Info("正在执行 snapshot inspect 操作")
@@ -133,7 +134,14 @@ func ConsulBackup(req ConsulBackupRequest) error {
 	if err := compress.CompressFile(tempSnapshotPath, compressedPath, compressMethod); err != nil {
 		return fmt.Errorf("压缩 snapshot 文件失败: %v", err)
 	}
-	defer os.Remove(compressedPath)
+	// 压缩完成后删除未压缩的临时文件
+	if !req.KeepBackupFiles {
+		os.Remove(tempSnapshotPath)
+		defer os.Remove(compressedPath)
+	} else {
+		os.Remove(tempSnapshotPath) // 只保留压缩后的文件
+		logger.Info("备份文件已保留", "path", compressedPath)
+	}
 
 	// 获取压缩后的文件大小
 	compressedInfo, err := os.Stat(compressedPath)
@@ -187,6 +195,10 @@ func ConsulBackup(req ConsulBackupRequest) error {
 		return fmt.Errorf("上传到 OSS 失败: %v", err)
 	}
 
-	logger.Info("Consul snapshot 备份完成", "last_index", result.LastIndex)
+	if req.KeepBackupFiles {
+		logger.Info("Consul snapshot 备份完成，备份文件已保留", "last_index", result.LastIndex, "backup_file", compressedPath)
+	} else {
+		logger.Info("Consul snapshot 备份完成", "last_index", result.LastIndex)
+	}
 	return nil
 }

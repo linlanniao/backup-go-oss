@@ -16,6 +16,7 @@ var (
 	logDir          string // 日志目录
 	envFile         string // .env 文件路径
 	compressMethod  string // 压缩方式
+	keepBackupFiles bool   // 是否保留备份文件
 	ossEndpoint     string // OSS端点地址
 	ossAccessKey    string // OSS AccessKey
 	ossSecretKey    string // OSS SecretKey
@@ -78,6 +79,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&envFile, "env-file", "", ".env 配置文件路径（默认为当前目录下的 .env 文件）")
 	// 添加压缩方式选项
 	rootCmd.PersistentFlags().StringVarP(&compressMethod, "compress", "c", "zstd", "压缩方式 (zstd/gzip/none)，可通过 COMPRESS_METHOD 环境变量设置，默认为 zstd")
+	// 添加保留备份文件选项
+	rootCmd.PersistentFlags().BoolVar(&keepBackupFiles, "keep-backup-files", false, "保留备份文件（打包压缩后的文件），不上传到OSS后删除，可通过 KEEP_BACKUP_FILES 环境变量设置")
 	// 添加全局 OSS 配置选项
 	rootCmd.PersistentFlags().StringVarP(&ossEndpoint, "endpoint", "e", "", "OSS端点地址（可通过 OSS_ENDPOINT 环境变量设置）")
 	rootCmd.PersistentFlags().StringVarP(&ossAccessKey, "access-key", "a", "", "OSS AccessKey（可通过 OSS_ACCESS_KEY 环境变量设置）")
