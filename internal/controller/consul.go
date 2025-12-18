@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"backup-to-oss/internal/compress"
+	"backup-to-oss/internal/inspect"
 	"backup-to-oss/internal/ipfetcher"
 	"backup-to-oss/internal/logger"
 	"backup-to-oss/internal/oss"
@@ -114,6 +115,19 @@ func ConsulBackup(req ConsulBackupRequest) error {
 		return fmt.Errorf("重命名 snapshot 文件失败: %v", err)
 	}
 	defer os.Remove(tempSnapshotPath)
+
+	// 执行 inspect 操作验证 snapshot 完整性
+	logger.Info("正在执行 snapshot inspect 操作")
+	snapshotInfo, err := inspect.InspectSnapshot(tempSnapshotPath)
+	if err != nil {
+		return fmt.Errorf("snapshot inspect 失败，文件可能已损坏: %v", err)
+	}
+	logger.Info("Snapshot inspect 成功",
+		"id", snapshotInfo.ID,
+		"index", snapshotInfo.Index,
+		"term", snapshotInfo.Term,
+		"size", snapshotInfo.Size,
+		"version", snapshotInfo.Version)
 
 	// 压缩 snapshot 文件
 	compressMethod := req.CompressMethod
