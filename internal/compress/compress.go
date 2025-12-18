@@ -9,11 +9,15 @@ import (
 	"strings"
 
 	"github.com/klauspost/compress/gzip"
+	"github.com/klauspost/compress/zstd"
 )
 
-// CompressDir 压缩整个目录为 tar.gz 格式
+// CompressDir 压缩整个目录为 tar 格式（支持 zstd、gzip 或不压缩）
+// sourceDir: 源目录路径
+// outputFile: 输出文件路径
 // excludePatterns: 排除模式列表，支持 glob 模式（如 *.log, node_modules, .git）
-func CompressDir(sourceDir, outputFile string, excludePatterns []string) error {
+// compressMethod: 压缩方式 (zstd/gzip/none)，默认为 zstd
+func CompressDir(sourceDir, outputFile string, excludePatterns []string, compressMethod string) error {
 	// 验证源目录是否存在
 	info, err := os.Stat(sourceDir)
 	if err != nil {
@@ -30,12 +34,28 @@ func CompressDir(sourceDir, outputFile string, excludePatterns []string) error {
 	}
 	defer outFile.Close()
 
-	// 创建 gzip writer
-	gzipWriter := gzip.NewWriter(outFile)
-	defer gzipWriter.Close()
+	// 根据压缩方式创建压缩 writer
+	var compressWriter io.WriteCloser
+	switch compressMethod {
+	case "gzip":
+		compressWriter = gzip.NewWriter(outFile)
+	case "zstd", "":
+		// 默认为 zstd
+		zstdWriter, err := zstd.NewWriter(outFile)
+		if err != nil {
+			return fmt.Errorf("创建 zstd writer 失败: %v", err)
+		}
+		compressWriter = zstdWriter
+	case "none":
+		// 不压缩，直接使用文件
+		compressWriter = &nopCloser{Writer: outFile}
+	default:
+		return fmt.Errorf("不支持的压缩方式: %s，支持的方式: zstd, gzip, none", compressMethod)
+	}
+	defer compressWriter.Close()
 
 	// 创建 tar writer
-	tarWriter := tar.NewWriter(gzipWriter)
+	tarWriter := tar.NewWriter(compressWriter)
 	defer tarWriter.Close()
 
 	// 获取源目录的绝对路径
@@ -183,3 +203,58 @@ func shouldExclude(absPath, relPath, sourceDir string, excludePatterns []string)
 
 	return false
 }
+
+// CompressFile 压缩单个文件（支持 zstd、gzip 或不压缩）
+// sourceFile: 源文件路径
+// outputFile: 输出文件路径
+// compressMethod: 压缩方式 (zstd/gzip/none)，默认为 zstd
+func CompressFile(sourceFile, outputFile string, compressMethod string) error {
+	// 打开源文件
+	source, err := os.Open(sourceFile)
+	if err != nil {
+		return fmt.Errorf("打开源文件失败: %v", err)
+	}
+	defer source.Close()
+
+	// 创建输出文件
+	outFile, err := os.Create(outputFile)
+	if err != nil {
+		return fmt.Errorf("创建输出文件失败: %v", err)
+	}
+	defer outFile.Close()
+
+	// 根据压缩方式创建压缩 writer
+	var compressWriter io.WriteCloser
+	switch compressMethod {
+	case "gzip":
+		compressWriter = gzip.NewWriter(outFile)
+	case "zstd", "":
+		// 默认为 zstd
+		zstdWriter, err := zstd.NewWriter(outFile)
+		if err != nil {
+			return fmt.Errorf("创建 zstd writer 失败: %v", err)
+		}
+		compressWriter = zstdWriter
+	case "none":
+		// 不压缩，直接使用文件
+		compressWriter = &nopCloser{Writer: outFile}
+	default:
+		return fmt.Errorf("不支持的压缩方式: %s，支持的方式: zstd, gzip, none", compressMethod)
+	}
+	defer compressWriter.Close()
+
+	// 复制文件内容到压缩 writer
+	_, err = io.Copy(compressWriter, source)
+	if err != nil {
+		return fmt.Errorf("压缩文件失败: %v", err)
+	}
+
+	return nil
+}
+
+// nopCloser 是一个包装器，将 io.Writer 转换为 io.WriteCloser（Close 方法为空操作）
+type nopCloser struct {
+	io.Writer
+}
+
+func (nopCloser) Close() error { return nil }

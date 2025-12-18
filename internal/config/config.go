@@ -12,6 +12,7 @@ import (
 type Config struct {
 	DirPaths        []string // 支持多个目录
 	ExcludePatterns []string // 排除模式列表
+	CompressMethod  string   // 压缩方式 (zstd/gzip/none)
 	OSSEndpoint     string
 	OSSAccessKey    string
 	OSSSecretKey    string
@@ -60,9 +61,13 @@ func LoadConfig(envFile string) (*Config, error) {
 		}
 	}
 
+	// 获取压缩方式，默认为 zstd
+	compressMethod := getEnvOrDefault("COMPRESS_METHOD", "zstd")
+
 	cfg := &Config{
 		DirPaths:        dirPaths,
 		ExcludePatterns: excludePatterns,
+		CompressMethod:  compressMethod,
 		OSSEndpoint:     getEnvOrDefault("OSS_ENDPOINT", ""),
 		OSSAccessKey:    getEnvOrDefault("OSS_ACCESS_KEY", ""),
 		OSSSecretKey:    getEnvOrDefault("OSS_SECRET_KEY", ""),
@@ -74,7 +79,7 @@ func LoadConfig(envFile string) (*Config, error) {
 }
 
 // MergeWithFlags 将命令行参数合并到配置中（命令行参数优先级更高）
-func (c *Config) MergeWithFlags(dirPath, excludePatterns, endpoint, accessKey, secretKey, bucket, prefix string) {
+func (c *Config) MergeWithFlags(dirPath, excludePatterns, compressMethod, endpoint, accessKey, secretKey, bucket, prefix string) {
 	if dirPath != "" {
 		// 如果命令行指定了目录，解析逗号分隔的多个目录
 		dirs := strings.Split(dirPath, ",")
@@ -102,6 +107,9 @@ func (c *Config) MergeWithFlags(dirPath, excludePatterns, endpoint, accessKey, s
 		if len(excludeList) > 0 {
 			c.ExcludePatterns = excludeList
 		}
+	}
+	if compressMethod != "" {
+		c.CompressMethod = compressMethod
 	}
 	if endpoint != "" {
 		c.OSSEndpoint = endpoint

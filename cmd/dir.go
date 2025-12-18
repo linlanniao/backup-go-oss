@@ -23,14 +23,14 @@ var (
 var dirCmd = &cobra.Command{
 	Use:   "dir",
 	Short: "压缩备份整个目录到OSS",
-	Long: `将指定目录压缩为gzip格式后上传到阿里云OSS。
+	Long: `将指定目录压缩后上传到阿里云OSS（默认使用 zstd 压缩，可通过 --compress 参数选择压缩方式）。
 
 配置可以通过以下方式提供：
 1. .env 文件（可通过 --env-file 指定路径）
 2. 环境变量
 3. 命令行参数（优先级最高）
 
-OSS 相关配置（--endpoint, --access-key, --secret-key, --bucket, --prefix）为全局参数，可在任何子命令中使用。
+OSS 相关配置（--endpoint, --access-key, --secret-key, --bucket, --prefix）和压缩方式（--compress）为全局参数，可在任何子命令中使用。
 
 示例:
   backup-to-oss dir --path /path/to/dir
@@ -60,8 +60,18 @@ func runDirBackup() error {
 		return fmt.Errorf("加载配置失败: %v", err)
 	}
 
+	// 获取压缩方式（优先使用命令行参数，其次环境变量，最后使用默认值）
+	compressMethodValue := compressMethod
+	if compressMethodValue == "" {
+		if envCompress := os.Getenv("COMPRESS_METHOD"); envCompress != "" {
+			compressMethodValue = envCompress
+		} else {
+			compressMethodValue = "zstd" // 默认使用 zstd
+		}
+	}
+
 	// 合并命令行参数（命令行参数优先级更高）
-	cfg.MergeWithFlags(dirPath, excludePatterns, ossEndpoint, ossAccessKey, ossSecretKey, ossBucket, ossObjectPrefix)
+	cfg.MergeWithFlags(dirPath, excludePatterns, compressMethodValue, ossEndpoint, ossAccessKey, ossSecretKey, ossBucket, ossObjectPrefix)
 
 	// 验证配置
 	if err := cfg.Validate(); err != nil {
@@ -72,6 +82,7 @@ func runDirBackup() error {
 	req := controller.DirBackupRequest{
 		DirPaths:        cfg.DirPaths,
 		ExcludePatterns: cfg.ExcludePatterns,
+		CompressMethod:  cfg.CompressMethod,
 		OSSEndpoint:     cfg.OSSEndpoint,
 		OSSAccessKey:    cfg.OSSAccessKey,
 		OSSSecretKey:    cfg.OSSSecretKey,

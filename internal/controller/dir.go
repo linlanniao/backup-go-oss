@@ -17,6 +17,7 @@ import (
 type DirBackupRequest struct {
 	DirPaths        []string // 支持多个目录
 	ExcludePatterns []string // 排除模式列表
+	CompressMethod  string   // 压缩方式 (zstd/gzip/none)
 	OSSEndpoint     string
 	OSSAccessKey    string
 	OSSSecretKey    string
@@ -58,15 +59,32 @@ func DirBackup(req DirBackupRequest) error {
 		if dirPathForName == "" {
 			dirPathForName = "backup"
 		}
-		archiveName := fmt.Sprintf("%s_%s.tgz", timeStr, dirPathForName)
+		
+		// 根据压缩方式确定文件扩展名
+		var ext string
+		switch req.CompressMethod {
+		case "gzip":
+			ext = ".tgz"
+		case "zstd", "":
+			ext = ".tar.zst"
+		case "none":
+			ext = ".tar"
+		default:
+			ext = ".tar.zst" // 默认使用 zstd
+		}
+		archiveName := fmt.Sprintf("%s_%s%s", timeStr, dirPathForName, ext)
 		archivePath := filepath.Join(os.TempDir(), archiveName)
 
 		// 压缩目录
-		logger.Info("正在压缩目录")
+		compressMethod := req.CompressMethod
+		if compressMethod == "" {
+			compressMethod = "zstd" // 默认使用 zstd
+		}
+		logger.Info("正在压缩目录", "method", compressMethod)
 		if len(req.ExcludePatterns) > 0 {
 			logger.Info("排除模式", "patterns", req.ExcludePatterns)
 		}
-		if err := compress.CompressDir(dirPath, archivePath, req.ExcludePatterns); err != nil {
+		if err := compress.CompressDir(dirPath, archivePath, req.ExcludePatterns, compressMethod); err != nil {
 			logger.Error("压缩目录失败", "error", err)
 			continue
 		}
